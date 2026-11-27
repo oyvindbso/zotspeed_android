@@ -118,6 +118,14 @@ class ZoteroClient(private val apiKey: String) {
         return KeyInfo(o.getLong("userID"), o.optString("username"))
     }
 
+    /** Revokes this API key (used on sign-out for keys created through OAuth). */
+    suspend fun revokeKey() = withContext(Dispatchers.IO) {
+        val req = Request.Builder().url("$BASE/keys/current")
+            .header("Zotero-API-Version", "3").header("Zotero-API-Key", apiKey)
+            .delete().build()
+        http.newCall(req).execute().close()
+    }
+
     suspend fun groups(userId: Long): List<ZoteroLibrary> {
         val (body, _) = getJson("users/$userId/groups?limit=100")
         val arr = JSONArray(body)

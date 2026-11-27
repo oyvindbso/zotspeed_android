@@ -1,5 +1,6 @@
 package com.zotspeed
 
+import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
 import android.view.KeyEvent
@@ -14,6 +15,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.zotspeed.data.ZoteroOAuth
 import com.zotspeed.ui.AppViewModel
 import com.zotspeed.ui.LibraryScreen
 import com.zotspeed.ui.ReaderKey
@@ -29,6 +31,19 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent { App() }
+        if (savedInstanceState == null) handleIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleIntent(intent)
+    }
+
+    private fun handleIntent(intent: Intent?) {
+        val uri = intent?.data ?: return
+        if (uri.scheme == ZoteroOAuth.CALLBACK_SCHEME && uri.host == ZoteroOAuth.CALLBACK_HOST) {
+            vm.handleOAuthCallback(uri.getQueryParameter("oauth_token"), uri.getQueryParameter("oauth_verifier"))
+        }
     }
 
     @Composable

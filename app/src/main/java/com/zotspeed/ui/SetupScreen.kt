@@ -2,6 +2,7 @@ package com.zotspeed.ui
 
 import android.content.Intent
 import android.net.Uri
+import androidx.browser.customtabs.CustomTabsIntent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -21,6 +22,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -48,9 +51,22 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 fun SetupScreen(vm: AppViewModel) {
     val busy by vm.setupBusy.collectAsStateWithLifecycle()
     val error by vm.setupError.collectAsStateWithLifecycle()
+    val oauthClient by vm.oauthClient.collectAsStateWithLifecycle()
     var key by rememberSaveable { mutableStateOf("") }
     var show by rememberSaveable { mutableStateOf(false) }
+    var clientKey by rememberSaveable { mutableStateOf(oauthClient.first) }
+    var clientSecret by rememberSaveable { mutableStateOf(oauthClient.second) }
+    var showOAuthApp by rememberSaveable { mutableStateOf(!vm.oauthBuiltIn && oauthClient.first.isBlank()) }
     val context = LocalContext.current
+    val oauthReady = vm.oauthBuiltIn || (oauthClient.first.isNotBlank() && oauthClient.second.isNotBlank())
+
+    fun open(url: String) {
+        runCatching {
+            CustomTabsIntent.Builder().setShowTitle(true).build().launchUrl(context, Uri.parse(url))
+        }.onFailure {
+            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+        }
+    }
 
     Column(
         Modifier
@@ -64,17 +80,60 @@ fun SetupScreen(vm: AppViewModel) {
     ) {
         Text("ZotSpeed", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         Text(
-            "Speed-read the EPUBs in your Zotero library. Create a private API key with " +
-                "“Allow library access” and paste it below. (Tip: typing is easier on the main screen; " +
-                "after that, everything works on the cover screen.)",
+            "Speed-read the EPUBs in your Zotero library. Sign in once (easiest on the main screen); " +
+                "after that, everything works on the cover screen.",
             style = MaterialTheme.typography.bodySmall,
             modifier = Modifier.widthIn(max = 480.dp),
         )
-        TextButton(onClick = {
-            context.startActivity(
-                Intent(Intent.ACTION_VIEW, Uri.parse("https://www.zotero.org/settings/keys/new"))
-            )
-        }) { Text("Create a key on zotero.org") }
+
+        // --- Sign in with Zotero (OAuth) ---
+        Button(
+            onClick = { vm.startOAuth(::open) },
+            enabled = !busy && oauthReady,
+            modifier = Modifier.fillMaxWidth().widthIn(max = 480.dp),
+        ) { Text("Sign in with Zotero") }
+
+        if (!vm.oauthBuiltIn) {
+            TextButton(onClick = { showOAuthApp = !showOAuthApp }) {
+                Text(if (showOAuthApp) "Hide OAuth app settings" else "OAuth app settings")
+            }
+            if (showOAuthApp) {
+                Text(
+                    "Sign-in needs an OAuth app registered at zotero.org/oauth/apps " +
+                        "(callback URL: zotspeed://oauth). Paste its client key and secret here, " +
+                        "or build them into the APK (see README).",
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.widthIn(max = 480.dp),
+                )
+                TextButton(onClick = { open("https://www.zotero.org/oauth/apps") }) { Text("Register an OAuth app") }
+                OutlinedTextField(
+                    value = clientKey, onValueChange = { clientKey = it },
+                    label = { Text("Client key") }, singleLine = true,
+                    modifier = Modifier.fillMaxWidth().widthIn(max = 480.dp),
+                )
+                OutlinedTextField(
+                    value = clientSecret, onValueChange = { clientSecret = it },
+                    label = { Text("Client secret") }, singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    modifier = Modifier.fillMaxWidth().widthIn(max = 480.dp),
+                )
+                OutlinedButton(
+                    onClick = { vm.setOAuthClient(clientKey, clientSecret); showOAuthApp = false },
+                    enabled = clientKey.isNotBlank() && clientSecret.isNotBlank(),
+                ) { Text("Save") }
+            }
+        }
+
+        // --- Or paste an API key ---
+        Row(Modifier.widthIn(max = 480.dp), verticalAlignment = Alignment.CenterVertically) {
+            HorizontalDivider(Modifier.weight(1f))
+            Text("  or use an API key  ", style = MaterialTheme.typography.labelSmall)
+            HorizontalDivider(Modifier.weight(1f))
+        }
+        TextButton(onClick = { open("https://www.zotero.org/settings/keys/new") }) {
+            Text("Create a key on zotero.org")
+        }
         OutlinedTextField(
             value = key,
             onValueChange = { key = it },
@@ -94,8 +153,8 @@ fun SetupScreen(vm: AppViewModel) {
             Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Button(onClick = { vm.connect(key) }, enabled = !busy && key.isNotBlank()) {
-                Text("Connect")
+            OutlinedButton(onClick = { vm.connect(key) }, enabled = !busy && key.isNotBlank()) {
+                Text("Connect with key")
             }
             if (busy) {
                 Spacer(Modifier.size(12.dp))

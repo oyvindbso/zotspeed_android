@@ -19,6 +19,10 @@ jobs:
         run: ./gradlew --no-daemon testDebugUnitTest
       - name: Build APK
         run: ./gradlew --no-daemon assembleRelease
+        env:
+          # Optional: bake the Zotero OAuth app into the APK (repository secrets).
+          ZOTERO_CLIENT_KEY: ${{ secrets.ZOTERO_CLIENT_KEY }}
+          ZOTERO_CLIENT_SECRET: ${{ secrets.ZOTERO_CLIENT_SECRET }}
       - uses: actions/upload-artifact@v4
         with:
           name: zotspeed-apk

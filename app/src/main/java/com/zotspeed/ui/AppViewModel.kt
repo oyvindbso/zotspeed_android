@@ -11,6 +11,8 @@ import com.zotspeed.data.ReadMode
 import com.zotspeed.data.ReaderSettings
 import com.zotspeed.data.ZoteroClient
 import com.zotspeed.data.ZoteroLibrary
+import com.zotspeed.data.ZoteroOAuth
+import com.zotspeed.BuildConfig
 import com.zotspeed.epub.Book
 import com.zotspeed.epub.EpubParser
 import kotlinx.coroutines.Dispatchers
@@ -147,16 +149,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         _setupError.value = null
         viewModelScope.launch {
             try {
-                val c = ZoteroClient(key)
-                val info = c.keyInfo()
-                prefs.apiKey = key
-                prefs.userId = info.userId
-                prefs.username = info.username
-                prefs.libraryId = "user_${info.userId}"
-                prefs.libraryName = "My Library"
-                client = c
-                _screen.value = Screen.LIBRARY
-                initLibrary()
+                signIn(key, method = "key")
             } catch (e: Exception) {
                 _setupError.value = e.message ?: e.toString()
             } finally {
@@ -165,8 +158,102 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    private suspend fun signIn(key: String, method: String) {
+        val c = ZoteroClient(key)
+        val info = c.keyInfo()
+        prefs.apiKey = key
+        prefs.authMethod = method
+        prefs.userId = info.userId
+        prefs.username = info.username
+        prefs.libraryId = "user_${info.userId}"
+        prefs.libraryName = "My Library"
+        client = c
+        _screen.value = Screen.LIBRARY
+        initLibrary()
+    }
+
+    // ---- OAuth ----
+
+    private val builtInClient = BuildConfig.ZOTERO_CLIENT_KEY to BuildConfig.ZOTERO_CLIENT_SECRET
+
+    /** True when OAuth client credentials are built into this APK. */
+    val oauthBuiltIn: Boolean get() = builtInClient.first.isNotBlank() && builtInClient.second.isNotBlank()
+
+    private val _oauthClient = MutableStateFlow(prefs.oauthClientKey to prefs.oauthClientSecret)
+    /** Client key/secret entered in the app (used when none are built in). */
+    val oauthClient: StateFlow<Pair<String, String>> = _oauthClient.asStateFlow()
+
+    fun setOAuthClient(key: String, secret: String) {
+        prefs.oauthClientKey = key.trim()
+        prefs.oauthClientSecret = secret.trim()
+        _oauthClient.value = prefs.oauthClientKey to prefs.oauthClientSecret
+    }
+
+    private fun oauth(): ZoteroOAuth? {
+        val (k, s) = _oauthClient.value.takeIf { it.first.isNotBlank() && it.second.isNotBlank() }
+            ?: builtInClient.takeIf { oauthBuiltIn }
+            ?: return null
+        return ZoteroOAuth(k, s)
+    }
+
+    val oauthAvailable: Boolean get() = oauth() != null
+
+    /** Starts "Sign in with Zotero": fetches a request token, then [openUrl] opens the approval page. */
+    fun startOAuth(openUrl: (String) -> Unit) {
+        val o = oauth() ?: run {
+            _setupError.value = "Enter the OAuth client key and secret first."
+            return
+        }
+        _setupBusy.value = true
+        _setupError.value = null
+        viewModelScope.launch {
+            try {
+                val rt = o.requestToken()
+                prefs.oauthPending = rt.token to rt.secret
+                openUrl(o.authorizeUrl(rt.token))
+            } catch (e: Exception) {
+                _setupError.value = e.message ?: e.toString()
+            } finally {
+                _setupBusy.value = false
+            }
+        }
+    }
+
+    /** Handles zotspeed://oauth?oauth_token=…&oauth_verifier=… after the user approves access. */
+    fun handleOAuthCallback(token: String?, verifier: String?) {
+        val pending = prefs.oauthPending
+        val o = oauth()
+        if (pending == null || o == null) return
+        if (token == null || verifier == null || token != pending.first) {
+            prefs.oauthPending = null
+            _setupError.value = "Zotero sign-in was cancelled or did not complete."
+            return
+        }
+        _setupBusy.value = true
+        _setupError.value = null
+        viewModelScope.launch {
+            try {
+                val at = o.accessToken(ZoteroOAuth.RequestToken(pending.first, pending.second), verifier)
+                prefs.oauthPending = null
+                signIn(at.apiKey, method = "oauth")
+            } catch (e: Exception) {
+                _setupError.value = e.message ?: e.toString()
+            } finally {
+                prefs.oauthPending = null
+                _setupBusy.value = false
+            }
+        }
+    }
+
     fun signOut() {
         syncJob?.cancel()
+        // Keys created by "Sign in with Zotero" are revoked; pasted keys are left alone.
+        val revoke = client.takeIf { prefs.authMethod == "oauth" }
+        if (revoke != null) {
+            // Outlives the ViewModel scope so the revoke isn't cancelled by navigation.
+            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.IO)
+                .launch { runCatching { revoke.revokeKey() } }
+        }
         prefs.clearAccount()
         repo.clearAll()
         client = null

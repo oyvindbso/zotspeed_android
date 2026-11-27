@@ -19,13 +19,32 @@ back a sentence (up) in One-word mode. You can turn this off in the reading sett
 
 ## Setup
 
-1. Create a Zotero API key at <https://www.zotero.org/settings/keys/new> with **Allow library
-   access** (read-only is enough). To read from group libraries, also give the key read access to groups.
-2. Open ZotSpeed and paste the key. Typing is easier on the main screen. After that, everything
-   works on the cover screen.
-3. The app lists every EPUB attachment in your library. Use the dropdown in the top-left corner to switch to
-   a group library. Tap a book to download it and start reading. Long-press a downloaded book
-   to remove it from the device.
+### Sign in with Zotero (OAuth)
+
+1. Register an OAuth app (once) at <https://www.zotero.org/oauth/apps>. Use any name, and set the
+   **callback URL** to `zotspeed://oauth`. Zotero shows you a **client key** and a **client secret**.
+2. Give those credentials to the app in one of two ways:
+   - **In the app:** tap **OAuth app settings** on the first screen, paste the key and secret, and tap **Save**.
+   - **Built into the APK:** add `ZOTERO_CLIENT_KEY` and `ZOTERO_CLIENT_SECRET` as GitHub
+     repository secrets (Settings → Secrets and variables → Actions), or put them in `local.properties`
+     for local builds. The setup step is then skipped.
+3. Tap **Sign in with Zotero**, log in, and approve read access. You'll be sent back to the app.
+
+The app asks for read-only access to your library and your groups. Signing out revokes the key that was created at sign-in.
+Anyone who has the APK can extract the client secret from it. That's normal for OAuth 1.0 on mobile, but keep
+an APK with built-in credentials to yourself.
+
+### Or use an API key
+
+Create a key at <https://www.zotero.org/settings/keys/new> with **Allow library access**
+(read-only is enough; give it read access to groups if you want group libraries). Paste it
+under **or use an API key**.
+
+### Reading
+
+The app lists every EPUB attachment in your library. Use the dropdown in the top-left corner to switch to
+a group library. Tap a book to download it and start reading. Long-press a downloaded book
+to remove it from the device.
 
 The app checks for changes incrementally, using Zotero's library versions. Use
 **⋮ → Full re-sync** to rebuild the list from scratch.
@@ -72,5 +91,5 @@ SCREENSHOT_DIR=/tmp/shots SAMPLE_EPUB=/path/book.epub SAMPLE_EPUB_DIR=/path/epub
 
 - `epub/` – EPUB 2/3 parser: reads the spine and the nav document or NCX table of contents, and flattens XHTML into paragraphs.
 - `reader/Rsvp.kt` – word timing, sentence navigation, and the optimal-recognition-point position.
-- `data/` – Zotero Web API v3 client with incremental sync, a local library cache, and preferences.
+- `data/` – Zotero Web API v3 client with incremental sync, OAuth 1.0a sign-in, a local library cache, and preferences.
 - `ui/` – Jetpack Compose screens: setup, library, and the reader with its three modes.

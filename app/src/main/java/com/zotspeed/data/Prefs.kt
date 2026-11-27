@@ -29,6 +29,34 @@ class Prefs(context: Context) {
         get() = sp.getString("apiKey", "").orEmpty()
         set(v) = sp.edit { putString("apiKey", v) }
 
+    /** "oauth" when the key came from Zotero sign-in (so it can be revoked on sign-out). */
+    var authMethod: String
+        get() = sp.getString("authMethod", "key").orEmpty()
+        set(v) = sp.edit { putString("authMethod", v) }
+
+    /** Temporary OAuth request token, kept across process death while the browser is open. */
+    var oauthPending: Pair<String, String>?
+        get() {
+            val t = sp.getString("oauthToken", null) ?: return null
+            return t to sp.getString("oauthTokenSecret", "").orEmpty()
+        }
+        set(v) = sp.edit {
+            if (v == null) {
+                remove("oauthToken"); remove("oauthTokenSecret")
+            } else {
+                putString("oauthToken", v.first); putString("oauthTokenSecret", v.second)
+            }
+        }
+
+    /** OAuth client credentials entered in the app (override the ones built into the APK). */
+    var oauthClientKey: String
+        get() = sp.getString("oauthClientKey", "").orEmpty()
+        set(v) = sp.edit { putString("oauthClientKey", v) }
+
+    var oauthClientSecret: String
+        get() = sp.getString("oauthClientSecret", "").orEmpty()
+        set(v) = sp.edit { putString("oauthClientSecret", v) }
+
     var userId: Long
         get() = sp.getLong("userId", 0L)
         set(v) = sp.edit { putLong("userId", v) }
@@ -96,6 +124,6 @@ class Prefs(context: Context) {
     fun setProgress(bookId: String, value: Float) = sp.edit { putFloat("progress_$bookId", value) }
 
     fun clearAccount() = sp.edit {
-        remove("apiKey"); remove("userId"); remove("username"); remove("libraryId"); remove("libraryName")
+        remove("apiKey"); remove("authMethod"); remove("oauthToken"); remove("oauthTokenSecret"); remove("userId"); remove("username"); remove("libraryId"); remove("libraryName")
     }
 }
