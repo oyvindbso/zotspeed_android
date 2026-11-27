@@ -32,11 +32,15 @@ data class BookEntry(
     val year: String,
     val filename: String,
     val md5: String?,
+    /** Keys of the collections the book (its parent item, or the attachment itself) is in. */
+    val collections: List<String> = emptyList(),
+    val isbn: String = "",
 ) {
     fun toJson(): JSONObject = JSONObject()
         .put("key", key).put("parentKey", parentKey ?: JSONObject.NULL).put("title", title)
         .put("authors", authors).put("year", year).put("filename", filename)
         .put("md5", md5 ?: JSONObject.NULL)
+        .put("collections", JSONArray(collections)).put("isbn", isbn)
 
     companion object {
         fun fromJson(o: JSONObject) = BookEntry(
@@ -47,9 +51,23 @@ data class BookEntry(
             year = o.optString("year"),
             filename = o.optString("filename"),
             md5 = o.optStringOrNull("md5"),
+            collections = o.optJSONArray("collections").strings(),
+            isbn = o.optString("isbn"),
         )
     }
 }
+
+/** A Zotero collection; [parent] is the key of the parent collection, if any. */
+data class ZoteroCollection(val key: String, val name: String, val parent: String?) {
+    fun toJson(): JSONObject = JSONObject().put("key", key).put("name", name).put("parent", parent ?: JSONObject.NULL)
+
+    companion object {
+        fun fromJson(o: JSONObject) = ZoteroCollection(o.getString("key"), o.optString("name"), o.optStringOrNull("parent"))
+    }
+}
+
+internal fun JSONArray?.strings(): List<String> =
+    if (this == null) emptyList() else (0 until length()).map { getString(it) }
 
 internal fun JSONObject.optStringOrNull(name: String): String? =
     if (isNull(name)) null else optString(name).ifEmpty { null }
@@ -57,7 +75,7 @@ internal fun JSONObject.optStringOrNull(name: String): String? =
 /**
  * Small client for the Zotero Web API v3 (https://www.zotero.org/support/dev/web_api/v3/start).
  */
-class ZoteroClient(private val apiKey: String) {
+class ZoteroClient(private val apiKey: String, private val baseUrl: String = BASE) {
 
     private val http = OkHttpClient.Builder()
         .connectTimeout(20, TimeUnit.SECONDS)
@@ -67,7 +85,7 @@ class ZoteroClient(private val apiKey: String) {
         .build()
 
     private fun request(url: String): Request = Request.Builder()
-        .url(if (url.startsWith("http")) url else "$BASE/$url")
+        .url(if (url.startsWith("http")) url else "$baseUrl/$url")
         .header("Zotero-API-Version", "3")
         .header("Zotero-API-Key", apiKey)
         .build()
@@ -120,7 +138,7 @@ class ZoteroClient(private val apiKey: String) {
 
     /** Revokes this API key (used on sign-out for keys created through OAuth). */
     suspend fun revokeKey() = withContext(Dispatchers.IO) {
-        val req = Request.Builder().url("$BASE/keys/current")
+        val req = Request.Builder().url("$baseUrl/keys/current")
             .header("Zotero-API-Version", "3").header("Zotero-API-Key", apiKey)
             .delete().build()
         http.newCall(req).execute().close()
@@ -136,7 +154,26 @@ class ZoteroClient(private val apiKey: String) {
         }
     }
 
-    data class SyncResult(val entries: List<BookEntry>, val version: Long)
+    data class SyncResult(val entries: List<BookEntry>, val version: Long, val collections: List<ZoteroCollection>)
+
+    suspend fun collections(lib: ZoteroLibrary): List<ZoteroCollection> {
+        val out = ArrayList<ZoteroCollection>()
+        var start = 0
+        while (true) {
+            val (body, resp) = getJson("${lib.prefix}/collections?limit=100&start=$start")
+            val arr = JSONArray(body)
+            for (i in 0 until arr.length()) {
+                val d = arr.getJSONObject(i).getJSONObject("data")
+                // parentCollection is `false` for top-level collections.
+                val parent = d.opt("parentCollection") as? String
+                out += ZoteroCollection(d.getString("key"), d.optString("name"), parent)
+            }
+            start += arr.length()
+            val total = resp.header("Total-Results")?.toIntOrNull() ?: 0
+            if (arr.length() == 0 || start >= total) break
+        }
+        return out.sortedBy { it.name.lowercase() }
+    }
 
     /**
      * Returns all EPUB attachments in [lib]. When [previous] is given together with its
@@ -213,11 +250,16 @@ class ZoteroClient(private val apiKey: String) {
         for ((k, e) in result.entries.toList()) {
             val p = e.parentKey?.let { parents[it] } ?: continue
             if (newEpubs.none { it.getString("key") == k }) {
-                result[k] = e.copy(title = parentTitle(p) ?: e.title, authors = authors(p), year = year(p))
+                result[k] = e.copy(
+                    title = parentTitle(p) ?: e.title, authors = authors(p), year = year(p),
+                    collections = p.optJSONArray("collections").strings(), isbn = isbn(p),
+                )
             }
         }
 
-        return SyncResult(result.values.sortedBy { it.title.lowercase() }, libraryVersion)
+        onProgress("Fetching collections…")
+        val collections = collections(lib)
+        return SyncResult(result.values.sortedBy { it.title.lowercase() }, libraryVersion, collections)
     }
 
     private fun isDownloadableEpub(data: JSONObject): Boolean {
@@ -238,8 +280,17 @@ class ZoteroClient(private val apiKey: String) {
             year = parent?.let { year(it) }.orEmpty(),
             filename = data.optString("filename"),
             md5 = data.optStringOrNull("md5"),
+            collections = (data.optJSONArray("collections").strings() +
+                parent?.optJSONArray("collections").strings()).distinct(),
+            isbn = parent?.let { isbn(it) }.orEmpty(),
         )
     }
+
+    /** First ISBN of the item (the field may hold several), without hyphens. */
+    private fun isbn(p: JSONObject): String =
+        Regex("[0-9Xx-]{10,17}").findAll(p.optString("ISBN"))
+            .map { it.value.replace("-", "").uppercase() }
+            .firstOrNull { it.length == 10 || it.length == 13 }.orEmpty()
 
     private fun parentTitle(p: JSONObject): String? = p.optString("title").ifEmpty { null }
 

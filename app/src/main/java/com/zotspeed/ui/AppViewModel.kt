@@ -3,7 +3,10 @@ package com.zotspeed.ui
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.compose.ui.graphics.ImageBitmap
 import com.zotspeed.data.BookEntry
+import com.zotspeed.data.CoverRepository
+import com.zotspeed.data.ZoteroCollection
 import com.zotspeed.data.LibraryRepository
 import com.zotspeed.data.Position
 import com.zotspeed.data.Prefs
@@ -42,7 +45,30 @@ data class LibraryUi(
     /** bookId -> download progress (0..1, or -1 when unknown). */
     val downloading: Map<String, Float> = emptyMap(),
     val lastBook: Pair<String, String>? = null, // bookId to title
-)
+    val collections: List<ZoteroCollection> = emptyList(),
+    /** Selected collection key; null shows every book in the library. */
+    val collection: String? = null,
+    val gridView: Boolean = true,
+    val onlineCovers: Boolean = true,
+    /** Remaining books in a running "download all". */
+    val batchRemaining: Int = 0,
+) {
+    /** Books in the selected collection, including its subcollections. */
+    val visibleEntries: List<BookEntry>
+        get() {
+            val root = collection ?: return entries
+            val keys = HashSet<String>().apply { add(root) }
+            var grew = true
+            while (grew) {
+                grew = false
+                for (c in collections) if (c.parent in keys && keys.add(c.key)) grew = true
+            }
+            return entries.filter { e -> e.collections.any { it in keys } }
+        }
+
+    val collectionName: String?
+        get() = collection?.let { k -> collections.firstOrNull { it.key == k }?.name }
+}
 
 data class ReaderUi(
     val bookId: String = "",
@@ -55,6 +81,7 @@ data class ReaderUi(
 class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val prefs = Prefs(app)
     private val repo = LibraryRepository(app)
+    private val covers = CoverRepository(app, repo)
 
     private val _screen = MutableStateFlow(if (prefs.apiKey.isBlank()) Screen.SETUP else Screen.LIBRARY)
     val screen: StateFlow<Screen> = _screen.asStateFlow()
@@ -113,6 +140,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             it.copy(
                 current = lib,
                 entries = cached?.entries.orEmpty(),
+                collections = cached?.collections.orEmpty(),
+                collection = prefs.collection(lib.storageId),
+                gridView = prefs.gridView,
+                onlineCovers = prefs.onlineCovers,
                 error = null,
             )
         }
@@ -256,6 +287,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
         prefs.clearAccount()
         repo.clearAll()
+        covers.clearAll()
         client = null
         _library.value = LibraryUi()
         _reader.value = ReaderUi()
@@ -286,7 +318,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 val userCache = repo.load(userLibrary())
                 val keepGroups = groups ?: userCache?.groups.orEmpty()
-                repo.save(lib, LibraryRepository.Cached(res.entries, res.version, keepGroups))
+                repo.save(lib, LibraryRepository.Cached(res.entries, res.version, keepGroups, res.collections))
                 if (lib.type != "user" && groups != null) {
                     // Group list is kept with the user's own library cache.
                     val u = userCache ?: LibraryRepository.Cached(emptyList(), 0, groups)
@@ -295,6 +327,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 _library.update {
                     it.copy(
                         entries = if (it.current == lib) res.entries else it.entries,
+                        collections = if (it.current == lib) res.collections else it.collections,
+                        // Drop a selection whose collection was deleted in Zotero.
+                        collection = it.collection?.takeIf { k -> it.current != lib || res.collections.any { c -> c.key == k } },
                         libraries = listOf(userLibrary()) + keepGroups,
                     )
                 }
@@ -316,40 +351,88 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun deleteDownload(entry: BookEntry) {
         val id = bookIdFor(entry) ?: return
         repo.delete(id)
+        covers.deleteEpubCover(id)
         refreshLocalState()
+    }
+
+    // ---- Collections, covers, view ----
+
+    fun selectCollection(key: String?) {
+        val lib = _library.value.current ?: return
+        prefs.setCollection(lib.storageId, key)
+        _library.update { it.copy(collection = key) }
+    }
+
+    fun setGridView(grid: Boolean) {
+        prefs.gridView = grid
+        _library.update { it.copy(gridView = grid) }
+    }
+
+    fun setOnlineCovers(on: Boolean) {
+        prefs.onlineCovers = on
+        _library.update { it.copy(onlineCovers = on) }
+    }
+
+    suspend fun cover(entry: BookEntry): ImageBitmap? {
+        val id = bookIdFor(entry) ?: return null
+        return covers.cover(id, entry, _library.value.onlineCovers)
+    }
+
+    /** Downloads every book in the current view that isn't on the device yet. */
+    fun downloadAll() {
+        val lib = _library.value.current ?: return
+        val todo = _library.value.visibleEntries.filter { !repo.isDownloaded(repo.bookId(lib, it.key)) }
+        if (todo.isEmpty() || _library.value.batchRemaining > 0) return
+        viewModelScope.launch {
+            _library.update { it.copy(batchRemaining = todo.size) }
+            var failed = 0
+            for (e in todo) {
+                if (!ensureDownloaded(lib, e, reportErrors = false)) failed++
+                _library.update { it.copy(batchRemaining = it.batchRemaining - 1) }
+            }
+            refreshLocalState()
+            if (failed > 0) {
+                _library.update { it.copy(error = "$failed of ${todo.size} books could not be downloaded (WebDAV or linked files?).") }
+            }
+        }
+    }
+
+    /** Downloads [entry] if needed (or if it changed in Zotero). Returns true when a local copy exists. */
+    private suspend fun ensureDownloaded(lib: ZoteroLibrary, entry: BookEntry, reportErrors: Boolean): Boolean {
+        val c = client ?: return false
+        val id = repo.bookId(lib, entry.key)
+        val needsDownload = !repo.isDownloaded(id) ||
+            (entry.md5 != null && repo.localMd5(id) != null && repo.localMd5(id) != entry.md5)
+        if (!needsDownload) return true
+        _library.update { it.copy(downloading = it.downloading + (id to -1f), error = if (reportErrors) null else it.error) }
+        try {
+            c.download(lib, entry.key, repo.bookFile(id)) { p ->
+                _library.update { it.copy(downloading = it.downloading + (id to p)) }
+            }
+            repo.setLocalMd5(id, entry.md5)
+            covers.deleteEpubCover(id) // re-extract from the new file
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            if (reportErrors && !repo.isDownloaded(id)) {
+                val msg = if (e is com.zotspeed.data.ZoteroException && e.code == 404) {
+                    "File not found on zotero.org. Books stored via WebDAV or as linked files can't be downloaded through the Zotero API."
+                } else e.message ?: e.toString()
+                _library.update { it.copy(error = msg) }
+            }
+        } finally {
+            _library.update { it.copy(downloading = it.downloading - id) }
+        }
+        refreshLocalState()
+        return repo.isDownloaded(id)
     }
 
     fun open(entry: BookEntry) {
         val lib = _library.value.current ?: return
-        val c = client ?: return
         val id = repo.bookId(lib, entry.key)
         if (id in _library.value.downloading) return
         viewModelScope.launch {
-            val needsDownload = !repo.isDownloaded(id) ||
-                (entry.md5 != null && repo.localMd5(id) != null && repo.localMd5(id) != entry.md5)
-            if (needsDownload) {
-                _library.update { it.copy(downloading = it.downloading + (id to -1f), error = null) }
-                try {
-                    c.download(lib, entry.key, repo.bookFile(id)) { p ->
-                        _library.update { it.copy(downloading = it.downloading + (id to p)) }
-                    }
-                    repo.setLocalMd5(id, entry.md5)
-                } catch (e: kotlinx.coroutines.CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    val msg = if (e is com.zotspeed.data.ZoteroException && e.code == 404) {
-                        "File not found on zotero.org. Books stored via WebDAV or as linked files can't be downloaded through the Zotero API."
-                    } else e.message ?: e.toString()
-                    if (!repo.isDownloaded(id)) {
-                        _library.update { it.copy(downloading = it.downloading - id, error = msg) }
-                        return@launch
-                    }
-                } finally {
-                    _library.update { it.copy(downloading = it.downloading - id) }
-                }
-                refreshLocalState()
-            }
-            openBook(id, entry.title)
+            if (ensureDownloaded(lib, entry, reportErrors = true)) openBook(id, entry.title)
         }
     }
 

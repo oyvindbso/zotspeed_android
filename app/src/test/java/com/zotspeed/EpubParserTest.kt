@@ -113,6 +113,36 @@ class EpubParserTest {
     }
 
     @Test
+    fun findsCoverImages() {
+        val opf3 = """<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0"><manifest>
+            <item id="img" href="images/front.jpg" media-type="image/jpeg" properties="cover-image"/>
+            <item id="c" href="c.xhtml" media-type="application/xhtml+xml"/></manifest>
+            <spine><itemref idref="c"/></spine></package>"""
+        val e3 = epub(mapOf("META-INF/container.xml" to container, "OEBPS/content.opf" to opf3, "OEBPS/images/front.jpg" to "JPEG3"))
+        assertEquals("JPEG3", EpubParser.coverImage(e3)?.decodeToString())
+
+        val opf2 = """<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="2.0">
+            <metadata><meta name="cover" content="cov"/></metadata><manifest>
+            <item id="cov" href="pic.png" media-type="image/png"/>
+            <item id="c" href="c.xhtml" media-type="application/xhtml+xml"/></manifest>
+            <spine><itemref idref="c"/></spine></package>"""
+        val e2 = epub(mapOf("META-INF/container.xml" to container, "OEBPS/content.opf" to opf2, "OEBPS/pic.png" to "PNG2"))
+        assertEquals("PNG2", EpubParser.coverImage(e2)?.decodeToString())
+
+        val opfPage = """<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="2.0"><manifest>
+            <item id="t" href="text/title.xhtml" media-type="application/xhtml+xml"/>
+            <item id="i" href="img/a.gif" media-type="image/gif"/></manifest>
+            <spine><itemref idref="t"/></spine></package>"""
+        val ep = epub(
+            mapOf(
+                "META-INF/container.xml" to container, "OEBPS/content.opf" to opfPage,
+                "OEBPS/text/title.xhtml" to xhtml("<div><img src=\"../img/a.gif\"/></div>"), "OEBPS/img/a.gif" to "GIF",
+            )
+        )
+        assertEquals("GIF", EpubParser.coverImage(ep)?.decodeToString())
+    }
+
+    @Test
     fun resolvesRelativePaths() {
         assertEquals("OEBPS/img/a b.png", EpubParser.resolve("OEBPS/text", "../img/a%20b.png"))
         assertEquals("x.html", EpubParser.resolve("", "./x.html"))

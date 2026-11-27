@@ -58,7 +58,7 @@ fun bodyStyle(s: ReaderSettings): TextStyle = TextStyle(
 
 /** Full-screen dialog: works better than a sheet on the small cover screen. */
 @Composable
-private fun FullDialog(title: String, onDismiss: () -> Unit, content: @Composable () -> Unit) {
+internal fun FullDialog(title: String, onDismiss: () -> Unit, content: @Composable () -> Unit) {
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Column(
             Modifier

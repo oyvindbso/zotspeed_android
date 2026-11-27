@@ -12,7 +12,12 @@ class LibraryRepository(context: Context) {
     private val root = context.filesDir
     private val booksDir = File(root, "books").apply { mkdirs() }
 
-    data class Cached(val entries: List<BookEntry>, val version: Long, val groups: List<ZoteroLibrary>)
+    data class Cached(
+        val entries: List<BookEntry>,
+        val version: Long,
+        val groups: List<ZoteroLibrary>,
+        val collections: List<ZoteroCollection> = emptyList(),
+    )
 
     private fun cacheFile(lib: ZoteroLibrary) = File(root, "library_${lib.storageId}.json")
 
@@ -23,9 +28,12 @@ class LibraryRepository(context: Context) {
             val o = JSONObject(f.readText())
             val arr = o.getJSONArray("entries")
             val groups = o.optJSONArray("groups") ?: JSONArray()
+            val cols = o.optJSONArray("collections") ?: JSONArray()
             Cached(
                 entries = (0 until arr.length()).map { BookEntry.fromJson(arr.getJSONObject(it)) },
-                version = o.optLong("version"),
+                // Caches from before collections/ISBNs were stored need a full re-sync.
+                version = if (o.optInt("schema") >= SCHEMA) o.optLong("version") else 0L,
+                collections = (0 until cols.length()).map { ZoteroCollection.fromJson(cols.getJSONObject(it)) },
                 groups = (0 until groups.length()).map {
                     val g = groups.getJSONObject(it)
                     ZoteroLibrary("group", g.getLong("id"), g.getString("name"))
@@ -36,7 +44,9 @@ class LibraryRepository(context: Context) {
 
     suspend fun save(lib: ZoteroLibrary, c: Cached) = withContext(Dispatchers.IO) {
         val o = JSONObject()
+            .put("schema", SCHEMA)
             .put("version", c.version)
+            .put("collections", JSONArray().apply { c.collections.forEach { put(it.toJson()) } })
             .put("entries", JSONArray().apply { c.entries.forEach { put(it.toJson()) } })
             .put("groups", JSONArray().apply {
                 c.groups.forEach { put(JSONObject().put("id", it.id).put("name", it.name)) }
@@ -68,6 +78,10 @@ class LibraryRepository(context: Context) {
     fun delete(bookId: String) {
         bookFile(bookId).delete()
         File(booksDir, "$bookId.md5").delete()
+    }
+
+    companion object {
+        const val SCHEMA = 2
     }
 
     fun clearAll() {

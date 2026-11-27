@@ -40,11 +40,18 @@ Create a key at <https://www.zotero.org/settings/keys/new> with **Allow library 
 (read-only is enough; give it read access to groups if you want group libraries). Paste it
 under **or use an API key**.
 
-### Reading
+### Choosing a book
 
-The app lists every EPUB attachment in your library. Use the dropdown in the top-left corner to switch to
-a group library. Tap a book to download it and start reading. Long-press a downloaded book
-to remove it from the device.
+The app lists every EPUB attachment in your library as a grid of covers. You can switch to a list with the
+button at the top. Use the dropdown in the top-left corner to switch to a group library. Tap a book to download it
+and start reading. Long-press a downloaded book to remove it from the device.
+
+- **Collections:** tap the **All books** chip to choose a Zotero collection. Books in its
+  subcollections are included, and collections without EPUBs are hidden. **⋮ → Download all shown**
+  downloads every book in the current view, so you can read the collection offline.
+- **Covers:** downloaded books show the cover from inside the EPUB. Books that aren't downloaded yet
+  use Open Library's cover for the item's ISBN. This sends that ISBN to openlibrary.org, and you can
+  turn it off under **⋮ → Covers from Open Library**. Books with no cover get a generated one.
 
 The app checks for changes incrementally, using Zotero's library versions. Use
 **⋮ → Full re-sync** to rebuild the list from scratch.

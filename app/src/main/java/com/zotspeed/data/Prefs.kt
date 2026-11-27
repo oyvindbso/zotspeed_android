@@ -78,6 +78,22 @@ class Prefs(context: Context) {
         get() = runCatching { ReadMode.valueOf(sp.getString("readMode", null)!!) }.getOrDefault(ReadMode.RSVP)
         set(v) = sp.edit { putString("readMode", v.name) }
 
+    /** Look up covers on Open Library (by ISBN) for books that aren't downloaded. */
+    var onlineCovers: Boolean
+        get() = sp.getBoolean("onlineCovers", true)
+        set(v) = sp.edit { putBoolean("onlineCovers", v) }
+
+    var gridView: Boolean
+        get() = sp.getBoolean("gridView", true)
+        set(v) = sp.edit { putBoolean("gridView", v) }
+
+    /** Selected collection key per library, or null for all books. */
+    fun collection(libraryId: String): String? = sp.getString("collection_$libraryId", null)
+
+    fun setCollection(libraryId: String, key: String?) = sp.edit {
+        if (key == null) remove("collection_$libraryId") else putString("collection_$libraryId", key)
+    }
+
     var lastBook: String
         get() = sp.getString("lastBook", "").orEmpty()
         set(v) = sp.edit { putString("lastBook", v) }

@@ -1,13 +1,17 @@
 package com.zotspeed.ui
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -16,20 +20,31 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.MenuBook
+import androidx.compose.material.icons.automirrored.filled.ViewList
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.DownloadDone
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.LibraryBooks
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -37,6 +52,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconToggleButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -44,17 +60,26 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.zotspeed.data.BookEntry
+import com.zotspeed.data.ZoteroCollection
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -64,17 +89,20 @@ fun LibraryScreen(vm: AppViewModel) {
     var downloadedOnly by rememberSaveable { mutableStateOf(false) }
     var libMenu by remember { mutableStateOf(false) }
     var overflow by remember { mutableStateOf(false) }
+    var showCollections by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf<BookEntry?>(null) }
     var confirmSignOut by remember { mutableStateOf(false) }
     val colors = MaterialTheme.colorScheme
 
-    val filtered = remember(ui.entries, query, downloadedOnly, ui.downloaded) {
+    val inCollection = remember(ui.entries, ui.collections, ui.collection) { ui.visibleEntries }
+    val filtered = remember(inCollection, query, downloadedOnly, ui.downloaded) {
         val q = query.trim().lowercase()
-        ui.entries.filter { e ->
+        inCollection.filter { e ->
             (q.isEmpty() || e.title.lowercase().contains(q) || e.authors.lowercase().contains(q)) &&
                 (!downloadedOnly || vm.bookIdFor(e) in ui.downloaded)
         }
     }
+    val notDownloaded = filtered.count { vm.bookIdFor(it) !in ui.downloaded }
 
     Column(
         Modifier
@@ -82,7 +110,7 @@ fun LibraryScreen(vm: AppViewModel) {
             .background(colors.background)
             .safeDrawingPadding()
     ) {
-        // Compact header: library picker, refresh, overflow.
+        // Compact header: library picker, view toggle, refresh, overflow.
         Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.weight(1f)) {
                 TextButton(onClick = { libMenu = true }) {
@@ -104,6 +132,12 @@ fun LibraryScreen(vm: AppViewModel) {
                     }
                 }
             }
+            IconButton(onClick = { vm.setGridView(!ui.gridView) }) {
+                Icon(
+                    if (ui.gridView) Icons.AutoMirrored.Filled.ViewList else Icons.Default.GridView,
+                    if (ui.gridView) "Show as list" else "Show covers",
+                )
+            }
             if (ui.syncing) {
                 CircularProgressIndicator(Modifier.padding(12.dp).size(20.dp), strokeWidth = 2.dp)
             } else {
@@ -112,6 +146,16 @@ fun LibraryScreen(vm: AppViewModel) {
             Box {
                 IconButton(onClick = { overflow = true }) { Icon(Icons.Default.MoreVert, "More") }
                 DropdownMenu(expanded = overflow, onDismissRequest = { overflow = false }) {
+                    DropdownMenuItem(
+                        text = { Text("Download all shown ($notDownloaded)") },
+                        enabled = notDownloaded > 0 && ui.batchRemaining == 0,
+                        onClick = { overflow = false; vm.downloadAll() },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Covers from Open Library") },
+                        trailingIcon = { Checkbox(checked = ui.onlineCovers, onCheckedChange = null) },
+                        onClick = { vm.setOnlineCovers(!ui.onlineCovers) },
+                    )
                     DropdownMenuItem(text = { Text("Full re-sync") }, onClick = { overflow = false; vm.sync(full = true) })
                     DropdownMenuItem(
                         text = { Text("Sign out (${vm.username})") },
@@ -148,10 +192,7 @@ fun LibraryScreen(vm: AppViewModel) {
                         )
                     }
                     if (query.isNotEmpty()) {
-                        Icon(
-                            Icons.Default.Close, "Clear",
-                            Modifier.size(18.dp).combinedClickable(onClick = { query = "" }),
-                        )
+                        Icon(Icons.Default.Close, "Clear", Modifier.size(18.dp).clickable { query = "" })
                     }
                 }
             }
@@ -164,7 +205,45 @@ fun LibraryScreen(vm: AppViewModel) {
             }
         }
 
-        ui.syncMessage?.let {
+        // Collection picker.
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Surface(
+                onClick = { showCollections = true },
+                shape = RoundedCornerShape(50),
+                color = if (ui.collection != null) colors.primary.copy(alpha = 0.16f) else colors.surfaceContainer,
+                modifier = Modifier.weight(1f, fill = false),
+            ) {
+                Row(Modifier.padding(start = 10.dp, end = 6.dp, top = 5.dp, bottom = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        if (ui.collection != null) Icons.Default.FolderOpen else Icons.Default.LibraryBooks, null,
+                        Modifier.size(16.dp), tint = colors.primary,
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        "${ui.collectionName ?: "All books"} · ${inCollection.size}",
+                        style = MaterialTheme.typography.labelLarge,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    Icon(Icons.Default.ArrowDropDown, null, Modifier.size(20.dp))
+                }
+            }
+            if (ui.collection != null) {
+                IconButton(onClick = { vm.selectCollection(null) }, Modifier.size(32.dp)) {
+                    Icon(Icons.Default.Close, "Show all books", Modifier.size(18.dp))
+                }
+            }
+        }
+
+        val status = when {
+            ui.batchRemaining > 0 -> "Downloading… ${ui.batchRemaining} left"
+            else -> ui.syncMessage
+        }
+        status?.let {
             Text(it, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp))
         }
         ui.error?.let {
@@ -174,55 +253,73 @@ fun LibraryScreen(vm: AppViewModel) {
             }
         }
 
-        LazyColumn(Modifier.fillMaxSize()) {
-            ui.lastBook?.let { (_, title) ->
-                if (query.isEmpty()) item("continue") {
-                    Surface(
-                        color = colors.primary.copy(alpha = 0.14f),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 8.dp, vertical = 6.dp)
-                            .combinedClickable(onClick = { vm.openLast() }),
-                    ) {
-                        Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.AutoMirrored.Filled.MenuBook, null, tint = colors.primary)
-                            Spacer(Modifier.width(10.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text("Continue reading", style = MaterialTheme.typography.labelSmall, color = colors.primary)
-                                Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold)
-                            }
-                        }
-                    }
+        val showContinue = query.isEmpty() && ui.collection == null && ui.lastBook != null
+        val emptyText = when {
+            filtered.isNotEmpty() || ui.syncing -> null
+            ui.entries.isEmpty() -> "No EPUB files found in this library. EPUBs must be stored in Zotero storage (not WebDAV or linked files)."
+            inCollection.isEmpty() -> "No EPUBs in this collection."
+            else -> "No matches."
+        }
+
+        if (ui.gridView) {
+            LazyVerticalGrid(
+                columns = GridCells.Adaptive(minSize = 96.dp),
+                contentPadding = PaddingValues(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                if (showContinue) item("continue", span = { GridItemSpan(maxLineSpan) }) {
+                    ContinueCard(ui.lastBook!!.second) { vm.openLast() }
                 }
-            }
-            if (filtered.isEmpty() && !ui.syncing) {
-                item("empty") {
-                    Text(
-                        when {
-                            ui.entries.isEmpty() -> "No EPUB files found in this library. EPUBs must be stored in Zotero storage (not WebDAV or linked files)."
-                            else -> "No matches."
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(16.dp),
+                emptyText?.let { t -> item("empty", span = { GridItemSpan(maxLineSpan) }) { EmptyText(t) } }
+                items(filtered, key = { it.key }) { e ->
+                    val id = vm.bookIdFor(e)
+                    BookTile(
+                        vm = vm,
+                        entry = e,
+                        downloaded = id in ui.downloaded,
+                        onlineCovers = ui.onlineCovers,
+                        progress = id?.let { ui.progress[it] },
+                        downloading = id?.let { ui.downloading[it] },
+                        onClick = { vm.open(e) },
+                        onLongClick = { if (id in ui.downloaded) confirmDelete = e },
                     )
                 }
             }
-            items(filtered, key = { it.key }) { e ->
-                val id = vm.bookIdFor(e)
-                BookRow(
-                    entry = e,
-                    downloaded = id in ui.downloaded,
-                    progress = id?.let { ui.progress[it] },
-                    downloading = id?.let { ui.downloading[it] },
-                    onClick = { vm.open(e) },
-                    onLongClick = { if (id in ui.downloaded) confirmDelete = e },
-                )
-                HorizontalDivider(color = colors.onSurface.copy(alpha = 0.08f))
+        } else {
+            LazyColumn(Modifier.fillMaxSize()) {
+                if (showContinue) item("continue") {
+                    Box(Modifier.padding(horizontal = 8.dp, vertical = 6.dp)) { ContinueCard(ui.lastBook!!.second) { vm.openLast() } }
+                }
+                emptyText?.let { t -> item("empty") { EmptyText(t) } }
+                items(filtered, key = { it.key }) { e ->
+                    val id = vm.bookIdFor(e)
+                    BookRow(
+                        vm = vm,
+                        entry = e,
+                        downloaded = id in ui.downloaded,
+                        onlineCovers = ui.onlineCovers,
+                        progress = id?.let { ui.progress[it] },
+                        downloading = id?.let { ui.downloading[it] },
+                        onClick = { vm.open(e) },
+                        onLongClick = { if (id in ui.downloaded) confirmDelete = e },
+                    )
+                    HorizontalDivider(color = colors.onSurface.copy(alpha = 0.08f))
+                }
             }
         }
     }
 
+    if (showCollections) {
+        CollectionDialog(
+            entries = ui.entries,
+            collections = ui.collections,
+            selected = ui.collection,
+            onDismiss = { showCollections = false },
+            onSelect = { showCollections = false; vm.selectCollection(it) },
+        )
+    }
     confirmDelete?.let { e ->
         AlertDialog(
             onDismissRequest = { confirmDelete = null },
@@ -236,9 +333,135 @@ fun LibraryScreen(vm: AppViewModel) {
         AlertDialog(
             onDismissRequest = { confirmSignOut = false },
             title = { Text("Sign out?") },
-            text = { Text("Removes the API key and downloaded books from this device.") },
+            text = { Text("Removes the Zotero sign-in and downloaded books from this device.") },
             confirmButton = { TextButton(onClick = { confirmSignOut = false; vm.signOut() }) { Text("Sign out") } },
             dismissButton = { TextButton(onClick = { confirmSignOut = false }) { Text("Cancel") } },
+        )
+    }
+}
+
+@Composable
+private fun EmptyText(text: String) {
+    Text(text, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(16.dp))
+}
+
+@Composable
+private fun ContinueCard(title: String, onClick: () -> Unit) {
+    val colors = MaterialTheme.colorScheme
+    Surface(
+        onClick = onClick,
+        color = colors.primary.copy(alpha = 0.14f),
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.AutoMirrored.Filled.MenuBook, null, tint = colors.primary)
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text("Continue reading", style = MaterialTheme.typography.labelSmall, color = colors.primary)
+                Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold)
+            }
+        }
+    }
+}
+
+/** Cover image, or a generated cover (colour from the title) while loading / when none exists. */
+@Composable
+fun BookCover(vm: AppViewModel, entry: BookEntry, downloaded: Boolean, onlineCovers: Boolean, modifier: Modifier = Modifier, compact: Boolean = false) {
+    val image by produceState<ImageBitmap?>(null, entry.key, downloaded, onlineCovers) { value = vm.cover(entry) }
+    Box(modifier.clip(RoundedCornerShape(if (compact) 3.dp else 6.dp))) {
+        val img = image
+        if (img != null) {
+            Image(img, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+        } else {
+            val hue = ((entry.title.hashCode() and 0x7fffffff) % 360).toFloat()
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(Color.hsl(hue, 0.35f, 0.32f))
+                    .padding(if (compact) 2.dp else 8.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (!compact) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            entry.title,
+                            color = Color.White,
+                            fontFamily = FontFamily.Serif,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 12.sp,
+                            lineHeight = 14.sp,
+                            textAlign = TextAlign.Center,
+                            maxLines = 5,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        if (entry.authors.isNotEmpty()) {
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                entry.authors,
+                                color = Color.White.copy(alpha = 0.8f),
+                                fontSize = 10.sp,
+                                textAlign = TextAlign.Center,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun StatusBadge(downloaded: Boolean, downloading: Float?, modifier: Modifier = Modifier) {
+    val colors = MaterialTheme.colorScheme
+    if (downloading == null && downloaded) return
+    Surface(shape = CircleShape, color = colors.surface.copy(alpha = 0.85f), modifier = modifier.size(26.dp)) {
+        Box(contentAlignment = Alignment.Center) {
+            when {
+                downloading != null && downloading >= 0f ->
+                    CircularProgressIndicator(progress = { downloading }, modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                downloading != null -> CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                else -> Icon(Icons.Default.CloudDownload, "Not downloaded", Modifier.size(16.dp), tint = colors.onSurface.copy(alpha = 0.7f))
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun BookTile(
+    vm: AppViewModel,
+    entry: BookEntry,
+    downloaded: Boolean,
+    onlineCovers: Boolean,
+    progress: Float?,
+    downloading: Float?,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+) {
+    val colors = MaterialTheme.colorScheme
+    Column(Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick)) {
+        Box(Modifier.fillMaxWidth().aspectRatio(2f / 3f)) {
+            BookCover(vm, entry, downloaded, onlineCovers, Modifier.fillMaxSize())
+            StatusBadge(downloaded, downloading, Modifier.align(Alignment.TopEnd).padding(4.dp))
+            if (progress != null && progress > 0f) {
+                LinearProgressIndicator(
+                    progress = { progress },
+                    modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(3.dp),
+                    color = colors.primary,
+                    trackColor = Color.Black.copy(alpha = 0.4f),
+                    drawStopIndicator = {},
+                )
+            }
+        }
+        Text(
+            entry.title,
+            style = MaterialTheme.typography.labelMedium,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(top = 4.dp),
         )
     }
 }
@@ -246,8 +469,10 @@ fun LibraryScreen(vm: AppViewModel) {
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun BookRow(
+    vm: AppViewModel,
     entry: BookEntry,
     downloaded: Boolean,
+    onlineCovers: Boolean,
     progress: Float?,
     downloading: Float?,
     onClick: () -> Unit,
@@ -258,10 +483,11 @@ private fun BookRow(
         Modifier
             .fillMaxWidth()
             .combinedClickable(onClick = onClick, onLongClick = onLongClick)
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+            .padding(horizontal = 12.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
+        BookCover(vm, entry, downloaded, onlineCovers, Modifier.width(36.dp).aspectRatio(2f / 3f), compact = true)
         Column(Modifier.weight(1f)) {
             Text(
                 entry.title,
@@ -283,11 +509,7 @@ private fun BookRow(
         }
         Box(Modifier.size(36.dp), contentAlignment = Alignment.Center) {
             when {
-                downloading != null -> if (downloading < 0f) {
-                    CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
-                } else {
-                    CircularProgressIndicator(progress = { downloading }, modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
-                }
+                downloading != null -> StatusBadge(downloaded, downloading)
                 downloaded && progress != null && progress > 0f -> Text(
                     "${(progress * 100).toInt()}%",
                     style = MaterialTheme.typography.labelSmall,
@@ -300,5 +522,93 @@ private fun BookRow(
                 )
             }
         }
+    }
+}
+
+/** Collection tree; collections without any EPUBs (including subcollections) are hidden. */
+@Composable
+private fun CollectionDialog(
+    entries: List<BookEntry>,
+    collections: List<ZoteroCollection>,
+    selected: String?,
+    onDismiss: () -> Unit,
+    onSelect: (String?) -> Unit,
+) {
+    val rows = remember(entries, collections) {
+        val children = collections.groupBy { it.parent }
+        val booksIn = HashMap<String, MutableSet<String>>()
+        for (e in entries) for (c in e.collections) booksIn.getOrPut(c) { HashSet() }.add(e.key)
+        fun subtree(key: String): Set<String> {
+            val set = HashSet(booksIn[key].orEmpty())
+            children[key]?.forEach { set.addAll(subtree(it.key)) }
+            return set
+        }
+        val out = ArrayList<Triple<ZoteroCollection, Int, Int>>() // collection, depth, count
+        fun walk(parent: String?, depth: Int) {
+            for (c in children[parent].orEmpty().sortedBy { it.name.lowercase() }) {
+                val count = subtree(c.key).size
+                if (count == 0) continue
+                out += Triple(c, depth, count)
+                walk(c.key, depth + 1)
+            }
+        }
+        walk(null, 0)
+        out
+    }
+    val colors = MaterialTheme.colorScheme
+    FullDialog("Collections", onDismiss) {
+        LazyColumn(Modifier.fillMaxSize()) {
+            item {
+                CollectionRow(Icons.Default.LibraryBooks, "All books", entries.size, 0, selected == null) { onSelect(null) }
+            }
+            items(rows, key = { it.first.key }) { (c, depth, count) ->
+                CollectionRow(
+                    if (c.key == selected) Icons.Default.FolderOpen else Icons.Default.Folder,
+                    c.name, count, depth, c.key == selected,
+                ) { onSelect(c.key) }
+            }
+            if (rows.isEmpty()) {
+                item {
+                    Text(
+                        "No collections contain EPUBs. If you just changed them in Zotero, tap the sync button.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.onBackground.copy(alpha = 0.7f),
+                        modifier = Modifier.padding(16.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CollectionRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    name: String,
+    count: Int,
+    depth: Int,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val colors = MaterialTheme.colorScheme
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .background(if (selected) colors.primary.copy(alpha = 0.14f) else Color.Transparent)
+            .padding(start = 16.dp + 16.dp * depth.coerceAtMost(4), end = 16.dp, top = 10.dp, bottom = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, null, Modifier.size(18.dp), tint = colors.primary)
+        Spacer(Modifier.width(10.dp))
+        Text(
+            name,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        Text("$count", style = MaterialTheme.typography.labelSmall, color = colors.onBackground.copy(alpha = 0.55f))
     }
 }

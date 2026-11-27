@@ -98,6 +98,46 @@ object EpubParser {
         return Book(title = title.ifEmpty { "Untitled" }, author = author, chapters = chapters)
     }
 
+    fun coverImage(file: File): ByteArray? = runCatching {
+        ZipFile(file).use { zip ->
+            coverImage { name -> zip.getEntry(name)?.let { e -> zip.getInputStream(e).use { it.readBytes() } } }
+        }
+    }.getOrNull()
+
+    /**
+     * Finds the cover image: EPUB 3 `properties="cover-image"`, EPUB 2 `<meta name="cover">`,
+     * a manifest image named like a cover, or the first image on the first page.
+     */
+    fun coverImage(read: (String) -> ByteArray?): ByteArray? {
+        val container = read("META-INF/container.xml") ?: return null
+        val opfPath = xml(container).allByLocalName("rootfile").firstOrNull()?.attr("full-path") ?: return null
+        val opf = xml(read(opfPath) ?: return null)
+        val opfDir = opfPath.substringBeforeLast('/', "")
+        val items = opf.allByLocalName("item")
+        fun isImage(e: Element) = e.attr("media-type").startsWith("image/") ||
+            e.attr("href").substringAfterLast('.').lowercase() in setOf("jpg", "jpeg", "png", "gif", "webp")
+        fun path(e: Element) = resolve(opfDir, e.attr("href"))
+
+        items.firstOrNull { it.attr("properties").split(' ').contains("cover-image") }
+            ?.let { read(path(it)) }?.let { return it }
+        opf.allByLocalName("meta").firstOrNull { it.attr("name") == "cover" }?.attr("content")?.let { id ->
+            items.firstOrNull { it.attr("id") == id && isImage(it) }?.let { read(path(it)) }?.let { return it }
+        }
+        items.firstOrNull { isImage(it) && (it.attr("id") + it.attr("href")).contains("cover", ignoreCase = true) }
+            ?.let { read(path(it)) }?.let { return it }
+
+        // First image referenced by the first spine document (often a cover page).
+        val byId = items.associateBy { it.attr("id") }
+        val first = opf.allByLocalName("itemref").firstNotNullOfOrNull { byId[it.attr("idref")] } ?: return null
+        val firstPath = path(first)
+        val html = read(firstPath) ?: return null
+        val doc = Jsoup.parse(ByteArrayInputStream(html), null, "")
+        val src = doc.select("img[src]").firstOrNull()?.attr("src")
+            ?: doc.getElementsByTag("image").firstOrNull()?.let { it.attr("xlink:href").ifEmpty { it.attr("href") } }
+            ?: return null
+        return read(resolve(firstPath.substringBeforeLast('/', ""), src.substringBefore('#')))
+    }
+
     private val BLOCK_TAGS = setOf(
         "p", "div", "h1", "h2", "h3", "h4", "h5", "h6", "li", "blockquote", "section", "article",
         "header", "footer", "aside", "pre", "tr", "dd", "dt", "figcaption", "br", "hr", "table",

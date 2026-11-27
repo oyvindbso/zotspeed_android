@@ -5,6 +5,7 @@ import android.graphics.Canvas
 import android.view.View
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import com.zotspeed.data.Position
 import com.zotspeed.data.Prefs
@@ -91,23 +92,41 @@ class CoverScreenRenderTest {
             entries.put(
                 JSONObject().put("key", "K$i").put("parentKey", "P$i").put("title", t).put("authors", a)
                     .put("year", y).put("filename", "$i.epub").put("md5", JSONObject.NULL)
+                    .put("collections", JSONArray().put(if (i % 2 == 0) "C1" else "C2"))
             )
         }
         File(app.filesDir, "library_user_1.json").writeText(
-            JSONObject().put("version", 5).put("entries", entries)
+            JSONObject().put("schema", 2).put("version", 5).put("entries", entries)
+                .put(
+                    "collections", JSONArray()
+                        .put(JSONObject().put("key", "C1").put("name", "Fiction").put("parent", JSONObject.NULL))
+                        .put(JSONObject().put("key", "C2").put("name", "Non-fiction").put("parent", JSONObject.NULL))
+                        .put(JSONObject().put("key", "C3").put("name", "Thesis reading").put("parent", "C2"))
+                )
                 .put("groups", JSONArray().put(JSONObject().put("id", 9).put("name", "Reading group"))).toString()
         )
         File(app.filesDir, "books").mkdirs()
-        File(app.filesDir, "books/user_1_K0.epub").writeText("x")
+        val sample = System.getenv("SAMPLE_EPUB")?.let(::File)
+        if (sample != null && sample.exists()) sample.copyTo(File(app.filesDir, "books/user_1_K0.epub"), overwrite = true)
+        else File(app.filesDir, "books/user_1_K0.epub").writeText("x")
         File(app.filesDir, "books/user_1_K2.epub").writeText("x")
         prefs.setProgress("user_1_K0", 0.42f)
         prefs.lastBook = "user_1_K0"
 
         val vm = AppViewModel(app)
         rule.setContent { ZotSpeedTheme(ThemeMode.BLACK) { LibraryScreen(vm) } }
-        rule.mainClock.advanceTimeBy(500)
+        repeat(20) { Thread.sleep(100); rule.mainClock.advanceTimeBy(100); rule.waitForIdle() }
         vm.dismissError()
         save("02_library")
+        vm.setGridView(false)
+        repeat(5) { Thread.sleep(100); rule.mainClock.advanceTimeBy(100); rule.waitForIdle() }
+        save("02b_library_list")
+        vm.setGridView(true)
+        rule.onNodeWithText("All books · 6").performClick()
+        save("02c_collections", dialog = true)
+        rule.onNodeWithText("Fiction").performClick()
+        repeat(5) { Thread.sleep(100); rule.mainClock.advanceTimeBy(100); rule.waitForIdle() }
+        save("02d_collection_selected")
     }
 
     private fun reader(mode: ReadMode, theme: ThemeMode, name: String, extra: (AppViewModel) -> Unit = {}) {
