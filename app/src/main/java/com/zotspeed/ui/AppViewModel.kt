@@ -46,28 +46,45 @@ data class LibraryUi(
     val downloading: Map<String, Float> = emptyMap(),
     val lastBook: Pair<String, String>? = null, // bookId to title
     val collections: List<ZoteroCollection> = emptyList(),
-    /** Selected collection key; null shows every book in the library. */
-    val collection: String? = null,
+    /** Open tabs: collection keys, or [ALL_BOOKS]. Empty means the user still has to choose. */
+    val tabs: List<String> = emptyList(),
+    val activeTab: Int = 0,
+    /** Set after the first sync of a library, so we know whether there are collections to choose from. */
+    val synced: Boolean = false,
     val gridView: Boolean = true,
     val onlineCovers: Boolean = true,
     /** Remaining books in a running "download all". */
     val batchRemaining: Int = 0,
 ) {
-    /** Books in the selected collection, including its subcollections. */
-    val visibleEntries: List<BookEntry>
-        get() {
-            val root = collection ?: return entries
-            val keys = HashSet<String>().apply { add(root) }
-            var grew = true
-            while (grew) {
-                grew = false
-                for (c in collections) if (c.parent in keys && keys.add(c.key)) grew = true
-            }
-            return entries.filter { e -> e.collections.any { it in keys } }
-        }
+    /** Collection key of the active tab; null for all books. */
+    val collection: String?
+        get() = tabs.getOrNull(activeTab)?.takeIf { it != ALL_BOOKS }
 
-    val collectionName: String?
-        get() = collection?.let { k -> collections.firstOrNull { it.key == k }?.name }
+    /** True when the user should be asked which collection to open. */
+    val needsCollectionChoice: Boolean
+        get() = current != null && tabs.isEmpty() && collections.isNotEmpty()
+
+    fun tabName(key: String): String =
+        if (key == ALL_BOOKS) "All books" else collections.firstOrNull { it.key == key }?.name ?: "…"
+
+    /** Books in the active tab's collection, including its subcollections. */
+    val visibleEntries: List<BookEntry>
+        get() = entriesIn(collection)
+
+    fun entriesIn(collectionKey: String?): List<BookEntry> {
+        val root = collectionKey ?: return entries
+        val keys = HashSet<String>().apply { add(root) }
+        var grew = true
+        while (grew) {
+            grew = false
+            for (c in collections) if (c.parent in keys && keys.add(c.key)) grew = true
+        }
+        return entries.filter { e -> e.collections.any { it in keys } }
+    }
+
+    companion object {
+        const val ALL_BOOKS = "*"
+    }
 }
 
 data class ReaderUi(
@@ -141,7 +158,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 current = lib,
                 entries = cached?.entries.orEmpty(),
                 collections = cached?.collections.orEmpty(),
-                collection = prefs.collection(lib.storageId),
+                tabs = prefs.tabs(lib.storageId),
+                activeTab = prefs.activeTab(lib.storageId),
+                synced = cached != null && cached.version > 0,
                 gridView = prefs.gridView,
                 onlineCovers = prefs.onlineCovers,
                 error = null,
@@ -325,11 +344,20 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     repo.save(userLibrary(), u.copy(groups = groups))
                 }
                 _library.update {
+                    if (it.current != lib) return@update it.copy(libraries = listOf(userLibrary()) + keepGroups)
+                    // Close tabs whose collection was deleted in Zotero.
+                    val active = it.tabs.getOrNull(it.activeTab)
+                    var tabs = it.tabs.filter { k -> k == LibraryUi.ALL_BOOKS || res.collections.any { c -> c.key == k } }
+                    // A library without collections has nothing to choose: show all books.
+                    if (tabs.isEmpty() && res.collections.isEmpty()) tabs = listOf(LibraryUi.ALL_BOOKS)
+                    val activeTab = tabs.indexOf(active).coerceAtLeast(0)
+                    prefs.setTabs(lib.storageId, tabs, activeTab)
                     it.copy(
-                        entries = if (it.current == lib) res.entries else it.entries,
-                        collections = if (it.current == lib) res.collections else it.collections,
-                        // Drop a selection whose collection was deleted in Zotero.
-                        collection = it.collection?.takeIf { k -> it.current != lib || res.collections.any { c -> c.key == k } },
+                        entries = res.entries,
+                        collections = res.collections,
+                        tabs = tabs,
+                        activeTab = activeTab,
+                        synced = true,
                         libraries = listOf(userLibrary()) + keepGroups,
                     )
                 }
@@ -357,10 +385,32 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---- Collections, covers, view ----
 
-    fun selectCollection(key: String?) {
+    /** Opens [key] (a collection key or [LibraryUi.ALL_BOOKS]) in a tab, or switches to it if already open. */
+    fun openTab(key: String) = updateTabs { tabs, _ ->
+        val i = tabs.indexOf(key)
+        if (i >= 0) tabs to i else (tabs + key) to tabs.size
+    }
+
+    fun selectTab(index: Int) = updateTabs { tabs, _ -> tabs to index.coerceIn(0, (tabs.size - 1).coerceAtLeast(0)) }
+
+    /** Closing the last tab brings back the collection prompt. */
+    fun closeTab(index: Int) = updateTabs { tabs, active ->
+        val rest = tabs.filterIndexed { i, _ -> i != index }
+        val newActive = when {
+            index < active -> active - 1
+            index == active -> (active - 1).coerceAtLeast(0)
+            else -> active
+        }.coerceIn(0, (rest.size - 1).coerceAtLeast(0))
+        rest to newActive
+    }
+
+    private fun updateTabs(change: (List<String>, Int) -> Pair<List<String>, Int>) {
         val lib = _library.value.current ?: return
-        prefs.setCollection(lib.storageId, key)
-        _library.update { it.copy(collection = key) }
+        _library.update {
+            val (tabs, active) = change(it.tabs, it.activeTab)
+            prefs.setTabs(lib.storageId, tabs, active)
+            it.copy(tabs = tabs, activeTab = active)
+        }
     }
 
     fun setGridView(grid: Boolean) {

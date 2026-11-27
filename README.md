@@ -46,9 +46,11 @@ The app lists every EPUB attachment in your library as a grid of covers. You can
 button at the top. Use the dropdown in the top-left corner to switch to a group library. Tap a book to download it
 and start reading. Long-press a downloaded book to remove it from the device.
 
-- **Collections:** tap the **All books** chip to choose a Zotero collection. Books in its
-  subcollections are included, and collections without EPUBs are hidden. **⋮ → Download all shown**
-  downloads every book in the current view, so you can read the collection offline.
+- **Collections and tabs:** the first time you open a library, the app asks which Zotero collection
+  to open. Each collection you open becomes a tab. Tap **+** to open another collection next to it, tap a tab to switch to it,
+  and tap ✕ on the active tab to close it. Closing the last tab asks you to choose a collection again. Tabs include books in
+  subcollections, are remembered for each library, and collections without EPUBs are hidden from the picker.
+  **⋮ → Download all shown** downloads every book in the current tab, so you can read it offline.
 - **Covers:** downloaded books show the cover from inside the EPUB. Books that aren't downloaded yet
   use Open Library's cover for the item's ISBN. This sends that ISBN to openlibrary.org, and you can
   turn it off under **⋮ → Covers from Open Library**. Books with no cover get a generated one.

@@ -87,12 +87,20 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("gridView", true)
         set(v) = sp.edit { putBoolean("gridView", v) }
 
-    /** Selected collection key per library, or null for all books. */
-    fun collection(libraryId: String): String? = sp.getString("collection_$libraryId", null)
+    /** Open collection tabs per library (collection keys, or "*" for all books) and the active one. */
+    fun tabs(libraryId: String): List<String> =
+        sp.getString("tabs_$libraryId", null)?.split(',')?.filter { it.isNotEmpty() }
+            ?: listOfNotNull(collection(libraryId)) // migrate the single-collection filter from 0.3
 
-    fun setCollection(libraryId: String, key: String?) = sp.edit {
-        if (key == null) remove("collection_$libraryId") else putString("collection_$libraryId", key)
+    fun setTabs(libraryId: String, tabs: List<String>, active: Int) = sp.edit {
+        putString("tabs_$libraryId", tabs.joinToString(","))
+        putInt("activeTab_$libraryId", active)
     }
+
+    fun activeTab(libraryId: String): Int = sp.getInt("activeTab_$libraryId", 0)
+
+    /** Selected collection key per library (0.3; superseded by tabs). */
+    fun collection(libraryId: String): String? = sp.getString("collection_$libraryId", null)
 
     var lastBook: String
         get() = sp.getString("lastBook", "").orEmpty()

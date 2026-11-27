@@ -92,7 +92,7 @@ class CoverScreenRenderTest {
             entries.put(
                 JSONObject().put("key", "K$i").put("parentKey", "P$i").put("title", t).put("authors", a)
                     .put("year", y).put("filename", "$i.epub").put("md5", JSONObject.NULL)
-                    .put("collections", JSONArray().put(if (i % 2 == 0) "C1" else "C2"))
+                    .put("collections", JSONArray().put(if (i % 2 == 0) "C1" else if (i == 5) "C3" else "C2"))
             )
         }
         File(app.filesDir, "library_user_1.json").writeText(
@@ -117,16 +117,15 @@ class CoverScreenRenderTest {
         rule.setContent { ZotSpeedTheme(ThemeMode.BLACK) { LibraryScreen(vm) } }
         repeat(20) { Thread.sleep(100); rule.mainClock.advanceTimeBy(100); rule.waitForIdle() }
         vm.dismissError()
-        save("02_library")
-        vm.setGridView(false)
-        repeat(5) { Thread.sleep(100); rule.mainClock.advanceTimeBy(100); rule.waitForIdle() }
-        save("02b_library_list")
-        vm.setGridView(true)
-        rule.onNodeWithText("All books · 6").performClick()
-        save("02c_collections", dialog = true)
+        save("02a_prompt", dialog = true)
         rule.onNodeWithText("Fiction").performClick()
-        repeat(5) { Thread.sleep(100); rule.mainClock.advanceTimeBy(100); rule.waitForIdle() }
-        save("02d_collection_selected")
+        repeat(10) { Thread.sleep(100); rule.mainClock.advanceTimeBy(100); rule.waitForIdle() }
+        save("02b_one_tab")
+        rule.onNodeWithContentDescription("Open another collection").performClick()
+        save("02c_add_tab", dialog = true)
+        rule.onNodeWithText("Thesis reading").performClick()
+        repeat(10) { Thread.sleep(100); rule.mainClock.advanceTimeBy(100); rule.waitForIdle() }
+        save("02d_two_tabs")
     }
 
     private fun reader(mode: ReadMode, theme: ThemeMode, name: String, extra: (AppViewModel) -> Unit = {}) {

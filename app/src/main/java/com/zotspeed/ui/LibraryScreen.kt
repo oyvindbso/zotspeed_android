@@ -19,6 +19,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
@@ -205,38 +211,14 @@ fun LibraryScreen(vm: AppViewModel) {
             }
         }
 
-        // Collection picker.
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Surface(
-                onClick = { showCollections = true },
-                shape = RoundedCornerShape(50),
-                color = if (ui.collection != null) colors.primary.copy(alpha = 0.16f) else colors.surfaceContainer,
-                modifier = Modifier.weight(1f, fill = false),
-            ) {
-                Row(Modifier.padding(start = 10.dp, end = 6.dp, top = 5.dp, bottom = 5.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        if (ui.collection != null) Icons.Default.FolderOpen else Icons.Default.LibraryBooks, null,
-                        Modifier.size(16.dp), tint = colors.primary,
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        "${ui.collectionName ?: "All books"} · ${inCollection.size}",
-                        style = MaterialTheme.typography.labelLarge,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false),
-                    )
-                    Icon(Icons.Default.ArrowDropDown, null, Modifier.size(20.dp))
-                }
-            }
-            if (ui.collection != null) {
-                IconButton(onClick = { vm.selectCollection(null) }, Modifier.size(32.dp)) {
-                    Icon(Icons.Default.Close, "Show all books", Modifier.size(18.dp))
-                }
-            }
+        // Collection tabs: one per open collection, "+" opens another.
+        if (ui.tabs.isNotEmpty()) {
+            CollectionTabs(
+                ui = ui,
+                onSelect = vm::selectTab,
+                onClose = vm::closeTab,
+                onAdd = { showCollections = true },
+            )
         }
 
         val status = when {
@@ -253,7 +235,8 @@ fun LibraryScreen(vm: AppViewModel) {
             }
         }
 
-        val showContinue = query.isEmpty() && ui.collection == null && ui.lastBook != null
+        val showContinue = query.isEmpty() && ui.lastBook != null &&
+            (ui.collection == null || inCollection.any { vm.bookIdFor(it) == ui.lastBook!!.first })
         val emptyText = when {
             filtered.isNotEmpty() || ui.syncing -> null
             ui.entries.isEmpty() -> "No EPUB files found in this library. EPUBs must be stored in Zotero storage (not WebDAV or linked files)."
@@ -311,13 +294,16 @@ fun LibraryScreen(vm: AppViewModel) {
         }
     }
 
-    if (showCollections) {
+    if (showCollections || ui.needsCollectionChoice) {
+        val prompt = ui.needsCollectionChoice
         CollectionDialog(
+            title = if (prompt) "Choose a collection" else "Open a collection",
             entries = ui.entries,
             collections = ui.collections,
-            selected = ui.collection,
-            onDismiss = { showCollections = false },
-            onSelect = { showCollections = false; vm.selectCollection(it) },
+            openKeys = ui.tabs.toSet(),
+            // Dismissing the first-time prompt falls back to all books.
+            onDismiss = { showCollections = false; if (prompt) vm.openTab(LibraryUi.ALL_BOOKS) },
+            onSelect = { showCollections = false; vm.openTab(it ?: LibraryUi.ALL_BOOKS) },
         )
     }
     confirmDelete?.let { e ->
@@ -528,9 +514,10 @@ private fun BookRow(
 /** Collection tree; collections without any EPUBs (including subcollections) are hidden. */
 @Composable
 private fun CollectionDialog(
+    title: String,
     entries: List<BookEntry>,
     collections: List<ZoteroCollection>,
-    selected: String?,
+    openKeys: Set<String>,
     onDismiss: () -> Unit,
     onSelect: (String?) -> Unit,
 ) {
@@ -556,15 +543,18 @@ private fun CollectionDialog(
         out
     }
     val colors = MaterialTheme.colorScheme
-    FullDialog("Collections", onDismiss) {
+    FullDialog(title, onDismiss) {
         LazyColumn(Modifier.fillMaxSize()) {
             item {
-                CollectionRow(Icons.Default.LibraryBooks, "All books", entries.size, 0, selected == null) { onSelect(null) }
+                CollectionRow(
+                    Icons.Default.LibraryBooks, "All books", entries.size, 0, LibraryUi.ALL_BOOKS in openKeys,
+                ) { onSelect(null) }
             }
             items(rows, key = { it.first.key }) { (c, depth, count) ->
+                val open = c.key in openKeys
                 CollectionRow(
-                    if (c.key == selected) Icons.Default.FolderOpen else Icons.Default.Folder,
-                    c.name, count, depth, c.key == selected,
+                    if (open) Icons.Default.FolderOpen else Icons.Default.Folder,
+                    c.name, count, depth, open,
                 ) { onSelect(c.key) }
             }
             if (rows.isEmpty()) {
@@ -575,6 +565,68 @@ private fun CollectionDialog(
                         color = colors.onBackground.copy(alpha = 0.7f),
                         modifier = Modifier.padding(16.dp),
                     )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CollectionTabs(
+    ui: LibraryUi,
+    onSelect: (Int) -> Unit,
+    onClose: (Int) -> Unit,
+    onAdd: () -> Unit,
+) {
+    val colors = MaterialTheme.colorScheme
+    val state = rememberLazyListState()
+    LaunchedEffect(ui.activeTab, ui.tabs.size) {
+        if (ui.tabs.isNotEmpty()) state.animateScrollToItem(ui.activeTab)
+    }
+    LazyRow(
+        state = state,
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        contentPadding = PaddingValues(horizontal = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        itemsIndexed(ui.tabs, key = { _, k -> k }) { i, key ->
+            val selected = i == ui.activeTab
+            Surface(
+                onClick = { onSelect(i) },
+                shape = RoundedCornerShape(50),
+                color = if (selected) colors.primary else colors.surfaceContainerHigh,
+                contentColor = if (selected) colors.onPrimary else colors.onSurface,
+            ) {
+                Row(
+                    Modifier.padding(start = 12.dp, end = if (selected) 4.dp else 12.dp).height(32.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        ui.tabName(key),
+                        style = MaterialTheme.typography.labelLarge,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.widthIn(max = 160.dp),
+                    )
+                    if (selected) {
+                        Text(
+                            " ${ui.entriesIn(key.takeIf { it != LibraryUi.ALL_BOOKS }).size}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = colors.onPrimary.copy(alpha = 0.75f),
+                        )
+                        Box(
+                            Modifier.size(28.dp).clip(CircleShape).clickable { onClose(i) },
+                            contentAlignment = Alignment.Center,
+                        ) { Icon(Icons.Default.Close, "Close tab", Modifier.size(16.dp)) }
+                    }
+                }
+            }
+        }
+        item("add") {
+            Surface(onClick = onAdd, shape = CircleShape, color = colors.surfaceContainer, modifier = Modifier.size(32.dp)) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(Icons.Default.Add, "Open another collection", Modifier.size(18.dp), tint = colors.primary)
                 }
             }
         }
