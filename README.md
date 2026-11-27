@@ -51,6 +51,9 @@ and start reading. Long-press a downloaded book to remove it from the device.
   and tap ✕ on the active tab to close it. Closing the last tab asks you to choose a collection again. Tabs include books in
   subcollections, are remembered for each library, and collections without EPUBs are hidden from the picker.
   **⋮ → Download all shown** downloads every book in the current tab, so you can read it offline.
+- **Sorting:** the sort button (☰) sorts books by **title**, **author**, or **year**. Tap the active key again,
+  or tick **Reverse order**, to reverse the order: Z–A, or newest first. Books without an author or year always go
+  last. Sorting follows your phone's language, so æ, ø and å come after z in Norwegian.
 - **Covers:** downloaded books show the cover from inside the EPUB. Books that aren't downloaded yet
   use Open Library's cover for the item's ISBN. This sends that ISBN to openlibrary.org, and you can
   turn it off under **⋮ → Covers from Open Library**. Books with no cover get a generated one.

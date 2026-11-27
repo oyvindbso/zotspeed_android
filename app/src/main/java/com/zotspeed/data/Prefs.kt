@@ -83,6 +83,13 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("onlineCovers", true)
         set(v) = sp.edit { putBoolean("onlineCovers", v) }
 
+    var sortOrder: SortOrder
+        get() = SortOrder(
+            key = runCatching { SortKey.valueOf(sp.getString("sortKey", null)!!) }.getOrDefault(SortKey.TITLE),
+            descending = sp.getBoolean("sortDescending", false),
+        )
+        set(v) = sp.edit { putString("sortKey", v.key.name); putBoolean("sortDescending", v.descending) }
+
     var gridView: Boolean
         get() = sp.getBoolean("gridView", true)
         set(v) = sp.edit { putBoolean("gridView", v) }

@@ -36,7 +36,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.MenuBook
+import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.automirrored.filled.ViewList
+import androidx.compose.material.icons.filled.ArrowDownward
+import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
@@ -85,6 +88,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.zotspeed.data.BookEntry
+import com.zotspeed.data.SortKey
+import com.zotspeed.data.Sorting
 import com.zotspeed.data.ZoteroCollection
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -95,18 +100,22 @@ fun LibraryScreen(vm: AppViewModel) {
     var downloadedOnly by rememberSaveable { mutableStateOf(false) }
     var libMenu by remember { mutableStateOf(false) }
     var overflow by remember { mutableStateOf(false) }
+    var sortMenu by remember { mutableStateOf(false) }
     var showCollections by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf<BookEntry?>(null) }
     var confirmSignOut by remember { mutableStateOf(false) }
     val colors = MaterialTheme.colorScheme
 
     val inCollection = remember(ui.entries, ui.collections, ui.collection) { ui.visibleEntries }
-    val filtered = remember(inCollection, query, downloadedOnly, ui.downloaded) {
+    val filtered = remember(inCollection, query, downloadedOnly, ui.downloaded, ui.sort) {
         val q = query.trim().lowercase()
-        inCollection.filter { e ->
-            (q.isEmpty() || e.title.lowercase().contains(q) || e.authors.lowercase().contains(q)) &&
-                (!downloadedOnly || vm.bookIdFor(e) in ui.downloaded)
-        }
+        Sorting.sort(
+            inCollection.filter { e ->
+                (q.isEmpty() || e.title.lowercase().contains(q) || e.authors.lowercase().contains(q)) &&
+                    (!downloadedOnly || vm.bookIdFor(e) in ui.downloaded)
+            },
+            ui.sort,
+        )
     }
     val notDownloaded = filtered.count { vm.bookIdFor(it) !in ui.downloaded }
 
@@ -136,6 +145,43 @@ fun LibraryScreen(vm: AppViewModel) {
                             trailingIcon = if (lib == ui.current) ({ Icon(Icons.Default.CheckCircle, null) }) else null,
                         )
                     }
+                }
+            }
+            Box {
+                IconButton(onClick = { sortMenu = true }) { Icon(Icons.AutoMirrored.Filled.Sort, "Sort") }
+                DropdownMenu(expanded = sortMenu, onDismissRequest = { sortMenu = false }) {
+                    Text(
+                        "Sort by",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = colors.onSurface.copy(alpha = 0.6f),
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                    )
+                    SortKey.entries.forEach { key ->
+                        val active = ui.sort.key == key
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    key.label + if (active) "  " + sortDirectionLabel(key, ui.sort.descending) else "",
+                                    fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
+                                )
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    if (active && ui.sort.descending) Icons.Default.ArrowDownward else Icons.Default.ArrowUpward,
+                                    null,
+                                    tint = if (active) colors.primary else Color.Transparent,
+                                )
+                            },
+                            // Tapping the active key again reverses it; the menu stays open to show the change.
+                            onClick = { vm.setSort(key) },
+                        )
+                    }
+                    HorizontalDivider()
+                    DropdownMenuItem(
+                        text = { Text("Reverse order") },
+                        trailingIcon = { Checkbox(checked = ui.sort.descending, onCheckedChange = null) },
+                        onClick = { vm.setSortOrder(ui.sort.copy(descending = !ui.sort.descending)) },
+                    )
                 }
             }
             IconButton(onClick = { vm.setGridView(!ui.gridView) }) {
@@ -261,6 +307,12 @@ fun LibraryScreen(vm: AppViewModel) {
                     BookTile(
                         vm = vm,
                         entry = e,
+                        // Show the sort value under the title so the order is visible.
+                        subtitle = when (ui.sort.key) {
+                            SortKey.AUTHOR -> e.authors
+                            SortKey.YEAR -> e.year
+                            SortKey.TITLE -> ""
+                        },
                         downloaded = id in ui.downloaded,
                         onlineCovers = ui.onlineCovers,
                         progress = id?.let { ui.progress[it] },
@@ -324,6 +376,11 @@ fun LibraryScreen(vm: AppViewModel) {
             dismissButton = { TextButton(onClick = { confirmSignOut = false }) { Text("Cancel") } },
         )
     }
+}
+
+private fun sortDirectionLabel(key: SortKey, descending: Boolean): String = when (key) {
+    SortKey.TITLE, SortKey.AUTHOR -> if (descending) "Z–A" else "A–Z"
+    SortKey.YEAR -> if (descending) "newest first" else "oldest first"
 }
 
 @Composable
@@ -420,6 +477,7 @@ private fun StatusBadge(downloaded: Boolean, downloading: Float?, modifier: Modi
 private fun BookTile(
     vm: AppViewModel,
     entry: BookEntry,
+    subtitle: String,
     downloaded: Boolean,
     onlineCovers: Boolean,
     progress: Float?,
@@ -449,6 +507,15 @@ private fun BookTile(
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(top = 4.dp),
         )
+        if (subtitle.isNotEmpty()) {
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.labelSmall,
+                color = colors.onSurface.copy(alpha = 0.6f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 

@@ -6,6 +6,8 @@ import androidx.lifecycle.viewModelScope
 import androidx.compose.ui.graphics.ImageBitmap
 import com.zotspeed.data.BookEntry
 import com.zotspeed.data.CoverRepository
+import com.zotspeed.data.SortKey
+import com.zotspeed.data.SortOrder
 import com.zotspeed.data.ZoteroCollection
 import com.zotspeed.data.LibraryRepository
 import com.zotspeed.data.Position
@@ -52,6 +54,7 @@ data class LibraryUi(
     /** Set after the first sync of a library, so we know whether there are collections to choose from. */
     val synced: Boolean = false,
     val gridView: Boolean = true,
+    val sort: SortOrder = SortOrder(),
     val onlineCovers: Boolean = true,
     /** Remaining books in a running "download all". */
     val batchRemaining: Int = 0,
@@ -162,6 +165,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 activeTab = prefs.activeTab(lib.storageId),
                 synced = cached != null && cached.version > 0,
                 gridView = prefs.gridView,
+                sort = prefs.sortOrder,
                 onlineCovers = prefs.onlineCovers,
                 error = null,
             )
@@ -411,6 +415,17 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             prefs.setTabs(lib.storageId, tabs, active)
             it.copy(tabs = tabs, activeTab = active)
         }
+    }
+
+    /** Picking the current key again flips the direction. */
+    fun setSort(key: SortKey) {
+        val cur = _library.value.sort
+        setSortOrder(if (cur.key == key) cur.copy(descending = !cur.descending) else SortOrder(key, cur.descending))
+    }
+
+    fun setSortOrder(order: SortOrder) {
+        prefs.sortOrder = order
+        _library.update { it.copy(sort = order) }
     }
 
     fun setGridView(grid: Boolean) {

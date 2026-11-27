@@ -126,6 +126,14 @@ class CoverScreenRenderTest {
         rule.onNodeWithText("Thesis reading").performClick()
         repeat(10) { Thread.sleep(100); rule.mainClock.advanceTimeBy(100); rule.waitForIdle() }
         save("02d_two_tabs")
+        rule.onNodeWithText("Fiction").performClick()
+        vm.selectTab(0)
+        rule.onNodeWithContentDescription("Sort").performClick()
+        rule.onNodeWithText("Year").performClick()
+        rule.onNodeWithText("Year  oldest first").performClick() // tap again: newest first
+        repeat(5) { Thread.sleep(100); rule.mainClock.advanceTimeBy(100); rule.waitForIdle() }
+        save("02e_sort_menu", dialog = true)
+        save("02f_sorted_newest_first") // the main window, behind the menu
     }
 
     private fun reader(mode: ReadMode, theme: ThemeMode, name: String, extra: (AppViewModel) -> Unit = {}) {
