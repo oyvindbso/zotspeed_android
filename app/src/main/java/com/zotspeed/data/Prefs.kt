@@ -113,6 +113,10 @@ class Prefs(context: Context) {
         get() = sp.getString("lastBook", "").orEmpty()
         set(v) = sp.edit { putString("lastBook", v) }
 
+    var lastBookTitle: String
+        get() = sp.getString("lastBookTitle", "").orEmpty()
+        set(v) = sp.edit { putString("lastBookTitle", v) }
+
     var reader: ReaderSettings
         get() {
             val d = ReaderSettings()

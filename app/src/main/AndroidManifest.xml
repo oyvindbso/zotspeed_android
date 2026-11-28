@@ -45,5 +45,21 @@
                 <data android:scheme="zotspeed" android:host="oauth" />
             </intent-filter>
         </activity>
+
+        <!-- Reader widget for the Flip cover screen (Flex Window). -->
+        <receiver
+            android:name=".widget.CoverWidgetProvider"
+            android:exported="false"
+            android:label="@string/widget_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/cover_widget_info" />
+            <meta-data
+                android:name="com.samsung.android.appwidget.provider"
+                android:resource="@xml/samsung_cover_widget_info" />
+        </receiver>
     </application>
 </manifest>

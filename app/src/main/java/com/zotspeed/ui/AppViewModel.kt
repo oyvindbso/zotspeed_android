@@ -20,6 +20,7 @@ import com.zotspeed.data.ZoteroOAuth
 import com.zotspeed.BuildConfig
 import com.zotspeed.epub.Book
 import com.zotspeed.epub.EpubParser
+import com.zotspeed.widget.CoverWidgetProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -501,6 +502,26 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** From the cover-screen widget: open the book it shows, straight into the reader. */
+    fun openLastFromWidget() {
+        val id = prefs.lastBook
+        if (prefs.apiKey.isBlank() || id.isEmpty() || !repo.isDownloaded(id)) return
+        if (_screen.value == Screen.READER && _reader.value.bookId == id) {
+            reloadPosition()
+            return
+        }
+        viewModelScope.launch { openBook(id, prefs.lastBookTitle.ifEmpty { "Book" }) }
+    }
+
+    /** Picks up page turns made in the widget while the app was in the background. */
+    fun reloadPosition() {
+        val r = _reader.value
+        val book = r.book ?: return
+        if (_screen.value != Screen.READER) return
+        val p = prefs.position(r.bookId)
+        _position.value = Position(p.chapter.coerceIn(0, book.chapters.lastIndex), p.offset.coerceAtLeast(0))
+    }
+
     fun openLast() {
         val (id, title) = _library.value.lastBook ?: return
         viewModelScope.launch { openBook(id, title) }
@@ -508,6 +529,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     internal suspend fun openBook(id: String, title: String) {
         prefs.lastBook = id
+        prefs.lastBookTitle = title
         _reader.value = ReaderUi(bookId = id, title = title, loading = true)
         _position.value = prefs.position(id)
         _screen.value = Screen.READER
@@ -524,6 +546,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun closeBook() {
         persistPosition()
+        CoverWidgetProvider.refresh(getApplication())
         _screen.value = Screen.LIBRARY
         refreshLocalState()
     }

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Sized and categorised as Samsung's Flex Window guide requires
+     (https://developer.samsung.com/galaxy-z/flex_window.html). -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/widget_description"
+    android:initialLayout="@layout/widget_cover_reader"
+    android:previewLayout="@layout/widget_cover_reader"
+    android:previewImage="@mipmap/ic_launcher"
+    android:minWidth="352dp"
+    android:minHeight="339dp"
+    android:resizeMode="horizontal|vertical"
+    android:updatePeriodMillis="0"
+    android:widgetCategory="keyguard" />

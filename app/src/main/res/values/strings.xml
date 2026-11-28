@@ -1,3 +1,6 @@
 <resources>
     <string name="app_name">ZotSpeed</string>
+    <string name="widget_name">ZotSpeed reader</string>
+    <string name="widget_description">Read your current book page by page on the cover screen.</string>
+    <string name="widget_empty">Open a book in ZotSpeed to read it here.</string>
 </resources>

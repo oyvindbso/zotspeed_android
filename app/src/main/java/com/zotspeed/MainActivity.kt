@@ -24,6 +24,7 @@ import com.zotspeed.ui.Screen
 import com.zotspeed.ui.SetupScreen
 import com.zotspeed.ui.theme.ZotSpeedTheme
 import com.zotspeed.ui.theme.isDark
+import com.zotspeed.widget.CoverWidgetProvider
 
 class MainActivity : ComponentActivity() {
     private val vm: AppViewModel by viewModels()
@@ -40,6 +41,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleIntent(intent: Intent?) {
+        if (intent?.getBooleanExtra(CoverWidgetProvider.EXTRA_OPEN_LAST, false) == true) {
+            vm.openLastFromWidget()
+            return
+        }
         val uri = intent?.data ?: return
         if (uri.scheme == ZoteroOAuth.CALLBACK_SCHEME && uri.host == ZoteroOAuth.CALLBACK_HOST) {
             vm.handleOAuthCallback(uri.getQueryParameter("oauth_token"), uri.getQueryParameter("oauth_verifier"))
@@ -91,8 +96,14 @@ class MainActivity : ComponentActivity() {
         return super.onKeyUp(keyCode, event)
     }
 
+    override fun onStart() {
+        super.onStart()
+        vm.reloadPosition() // the cover widget may have turned pages meanwhile
+    }
+
     override fun onStop() {
         vm.persistPosition()
+        CoverWidgetProvider.refresh(this)
         super.onStop()
     }
 }

@@ -67,15 +67,35 @@ through the Zotero Web API. Images in the books are ignored.
 
 ## Using it on the Flip cover screen
 
-The app is resizable and keeps running when it moves between the inner screen and the cover screen. Its
-layouts are built for a screen of about 340 × 380 dp. Two settings help on the cover screen:
+Samsung lets only the apps on its own list run full-screen on the Flip's cover screen (FlexWindow). On the Flip 8
+that is about 16 apps. Every other app needs Good Lock. ZotSpeed gives you two ways to read there:
 
-- **Theme → Black** (the default) uses true black, which saves power on the cover screen and blends into the bezel.
-- **Show over lock screen** lets you read on the cover screen without unlocking the phone.
+### 1. The ZotSpeed reader widget (no extra apps needed)
 
-Samsung only lets apps on its own list run in the Flex Window. To run an app you installed yourself, such as this one, use
-Samsung's **Good Lock** app and its **MultiStar** module. Under *I ♡ Galaxy Foldable → Launcher Widget*, add
-ZotSpeed. The exact menu names vary between One UI versions.
+ZotSpeed includes a widget for the cover screen, built as described in Samsung's
+[Flex Window guide](https://developer.samsung.com/galaxy-z/flex_window.html). Widgets on the cover screen work for any app,
+without Good Lock.
+
+- Add it under **Settings → Cover screen → Widgets**. The exact menu names can differ between One UI versions.
+- It shows the book you last opened in the app, one page at a time. Tap the right side of the page, or **›**,
+  for the next page, and the left side, or **‹**, to go back. It continues into the next chapter automatically.
+- The widget and the app share your reading position, so you can read on the cover screen and continue inside the phone.
+  It uses the app's text size and theme.
+- **⤢** opens the book in the full app on the cover screen. This only works if ZotSpeed is allowed on the
+  cover screen (see option 2). Otherwise One UI asks you to open the phone.
+
+One-word (RSVP) reading isn't available in the widget, because widgets can't redraw fast enough to show words at reading speed.
+Use the full app for that.
+
+### 2. The full app on the cover screen (via Good Lock)
+
+1. Install **Good Lock** from the Galaxy Store and enable its **MultiStar** module.
+2. In MultiStar, open the cover-screen section ("I ♡ Galaxy Foldable" → Launcher Widget, or "Cover screen apps"
+   on newer versions) and add ZotSpeed.
+
+The app is resizable, keeps running when it moves between screens, and its layouts are built for a screen of about
+340 × 380 dp. In the reading settings, **Theme → Black** (the default) suits the cover screen, and **Show over lock screen**
+lets you read there without unlocking the phone.
 
 ## Install
 
